@@ -114,9 +114,7 @@ UINT32 L_ChangeColor(UINT32 rgba, gop *gop)
     return 0;
 }
 
-void L_PrintBMP(file_info *bmp_image, gop gop, UINTN x, UINTN y,
-                  UINTN mask_start_x, UINTN mask_start_y,
-                  UINTN mask_end_x, UINTN mask_end_y)
+void L_PrintBMP(file_info *bmp_image, gop gop, UINTN x, UINTN y,UINTN mask_start_x, UINTN mask_start_y,UINTN mask_end_x, UINTN mask_end_y)
 {
     if (bmp_image == NULL ||
         bmp_image->file_addr == 0 ||
