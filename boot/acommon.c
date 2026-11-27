@@ -1,6 +1,9 @@
 
 #include "noUEFIcommon.h"
 
+extern void B_InitSerial(void);
+extern void LOGOUT(UINT8 *text);
+extern void L_HLT(void);
 
 typedef struct
 {
@@ -67,14 +70,19 @@ typedef struct
     EFI_PHYSICAL_ADDRESS file_buffer;
 } info;
 
-
-void L_LogMsg(STATUS st, const CHAR8 *func_name, CHAR16 *text, UINT8 type)
-{
-    UINT8 *msg = 0;
-    L_PrintB((UINT8 *)msg);
-
-    Print(L"[ERROR]%a: %s\n", func_name, text);
-    Print(L"        Status: %r\n", st);
+void L_PrintB(CHAR8 title,CHAR16 text,UINT64 num,UINT8 FLAGS){
+/* FLAGS
+1 改行
+2 type
+  0 [title] text num
+  1 text num title 
+3 num enable (0=true)
+4 debug massage
+5 
+6 
+7 
+8 
+*/
 }
 
 UINT32 L_ChangeColor(UINT32 rgba, gop *gop)
@@ -114,7 +122,8 @@ void L_PrintBMP(file_info *bmp_image, gop gop, UINTN x, UINTN y,
         bmp_image->file_addr == 0 ||
         bmp_image->file_size < 54)
     {
-        LOGOUT(EFI_LOAD_ERROR, L"Invalid BMP image\n", LOG_ERROR);
+        L_PrintB("ERROR",L"Invalid BMP image",0,1);
+
         return;
     }
 
@@ -127,7 +136,7 @@ void L_PrintBMP(file_info *bmp_image, gop gop, UINTN x, UINTN y,
 
     if (bpp != 24 && bpp != 32)
     {
-        LOGOUT(EFI_LOAD_ERROR, L"Unsupported BMP format\n", LOG_ERROR);
+        L_PrintB("ERROR",L"Unsupported BMP format",0,1);
         return;
     }
 
