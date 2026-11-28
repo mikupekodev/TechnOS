@@ -1,0 +1,17 @@
+{
+  "configurations": [
+    {
+      "name": "EDK2",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "/workspaces/edk2/MdePkg/Include",
+        "/workspaces/edk2/MdePkg/Include/X64",
+        "/workspaces/edk2/MdeModulePkg/Include",
+        "/workspaces/edk2/ShellPkg/Include"
+      ],
+      "cStandard": "c17",
+      "intelliSenseMode": "linux-gcc-x64"
+    }
+  ],
+  "version": 4
+}

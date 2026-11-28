@@ -1,5 +1,4 @@
 //ファイル名の先頭にaをつけることで一番上に表示させる
-//common.cとリンクさせる
 #include <Uefi.h>
 #include <Library/UefiLib.h>
 #include <Library/UefiApplicationEntryPoint.h>
@@ -56,6 +55,11 @@ https://qiita.com/ImagingSolAkira/items/30fd3727afa3076b8050
 6.virtual address set
 7.kernel setup（handout->virtual kernel->virtual)
 8.jump kernel
+
+~kernel~
+10.initapp
+11.play movie
+12.login
 */
 
 //==================================
@@ -850,6 +854,7 @@ void MapPage() {}
 
 void booster_main()
 {
+    K_PrintK("booster",L"boostertest",0,1);
 }
 
 
