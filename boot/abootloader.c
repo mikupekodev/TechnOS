@@ -33,10 +33,7 @@
 #define CHECK 0x1000000000
 
 typedef unsigned long long UINT64;
-
-
-
-
+void booster_main();
 
 EFI_FILE_PROTOCOL *root_dir;
 UINT8 debugmode = 0;
@@ -121,6 +118,143 @@ typedef struct
 //==================================
 // booster/loader lib
 // =================================
+extern void B_InitPasing(EFI_PHYSICAL_ADDRESS table);
+extern void B_InitSerial(void);
+extern void LOGOUT(UINT8 *text);
+extern void L_HLT(void);
+extern void B_TLBFlush(void);                 
+extern void  B_PageTableLoad(uintptr_t root);  
+extern void  B_InvalidatePage(uintptr_t va);  
+extern int   B_PageLevels(void);              
+extern void  B_PageMap(uintptr_t root, uintptr_t va, uintptr_t pa, unsigned flags);
+
+void K_PrintK(CHAR8 title,CHAR16 text,UINT64 num,UINT8 FLAGS){
+/* FLAGS
+1 改行
+2 type
+  0 [title] text num
+  1 text num title 
+3 num enable (0=true)
+4 debug massage
+5 
+6 
+7 
+8 
+*/
+}
+
+UINT32 L_ChangeColor(UINT32 rgba, gop *gop)
+{
+    UINT8 r = (rgba >> 24) & 0xFF;
+    UINT8 g = (rgba >> 16) & 0xFF;
+    UINT8 b = (rgba >> 8) & 0xFF;
+    UINT8 a = rgba & 0xFF;
+
+    if (gop->fomat == PixelRedGreenBlueReserved8BitPerColor)
+    {
+        return ((UINT32)b << 24) |
+               ((UINT32)g << 16) |
+               ((UINT32)r << 8) |
+               a;
+    }
+    else if (gop->fomat == PixelBlueGreenRedReserved8BitPerColor)
+    {
+        return ((UINT32)r << 24) |
+               ((UINT32)g << 16) |
+               ((UINT32)b << 8) |
+               a;
+    }
+    else
+    {
+        return 0;
+    }
+
+    return 0;
+}
+
+void L_PrintBMP(file_info *bmp_image, gop gop, UINTN x, UINTN y,UINTN mask_start_x, UINTN mask_start_y,UINTN mask_end_x, UINTN mask_end_y)
+{
+    if (bmp_image == NULL ||
+        bmp_image->file_addr == 0 ||
+        bmp_image->file_size < 54)
+    {
+        K_PrintK("ERROR",L"Invalid BMP image",0,1);
+
+        return;
+    }
+
+    UINT8 *bmp = (UINT8 *)(UINTN)bmp_image->file_addr;
+
+    UINT32 bmp_width = *(UINT32 *)(bmp + 18);
+    UINT32 bmp_height = *(UINT32 *)(bmp + 22);
+    UINT16 bpp = *(UINT16 *)(bmp + 28);
+    UINT32 offset = *(UINT32 *)(bmp + 10);
+
+    if (bpp != 24 && bpp != 32)
+    {
+        K_PrintK("ERROR",L"Unsupported BMP format",0,1);
+        return;
+    }
+
+    UINT32 bytes_per_pixel = bpp / 8;
+
+    UINT32 stride =
+        (bmp_width * bytes_per_pixel + 3) & ~3;
+
+    if (mask_end_x == 0)
+        mask_end_x = bmp_width;
+
+    if (mask_end_y == 0)
+        mask_end_y = bmp_height;
+
+    UINT8 *fb = (UINT8 *)(UINTN)gop.fb_base;
+
+    for (UINT32 py = mask_start_y; py < mask_end_y; py++)
+    {
+        for (UINT32 px = mask_start_x; px < mask_end_x; px++)
+        {
+            if (px >= bmp_width || py >= bmp_height)
+                continue;
+
+            UINT32 index =
+                offset +
+                (bmp_height - 1 - py) * stride +
+                px * bytes_per_pixel;
+
+            UINT8 b = bmp[index + 0];
+            UINT8 g = bmp[index + 1];
+            UINT8 r = bmp[index + 2];
+            UINT8 a = 0xFF;
+
+            if (bpp == 32)
+                a = bmp[index + 3];
+
+            UINT32 rgba =
+                ((UINT32)r << 24) |
+                ((UINT32)g << 16) |
+                ((UINT32)b << 8) |
+                a;
+
+            UINT32 pixel = L_ChangeColor(rgba, &gop);
+
+            UINTN screen_x =
+                x + (px - mask_start_x);
+
+            UINTN screen_y =
+                y + (py - mask_start_y);
+
+            if (screen_x < gop.width &&
+                screen_y < gop.height)
+            {
+                UINT32 fb_index =
+                    (screen_y * gop.pps + screen_x) * 4;
+
+                *(UINT32 *)(fb + fb_index) = pixel;
+            }
+        }
+    }
+}
+
 
 //==================================
 // function
@@ -139,7 +273,7 @@ EFI_STATUS B_GetFile(file_info *file_info, CHAR16 *path)
     st = root_dir->Open(root_dir, &File, path, EFI_FILE_MODE_READ, 0);
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"can’t open the file | code:",st,1);
+        K_PrintK("error",L"can’t open the file | code:",st,1);
         return EFI_LOAD_ERROR;
     }
 
@@ -193,13 +327,13 @@ EFI_STATUS B_GetFile(file_info *file_info, CHAR16 *path)
     if (EFI_ERROR(st))
     {
         File->Close(File);
-        L_PrintB("error",L"Failed to allocate pages for file | code:",st,1);
+        K_PrintK("error",L"Failed to allocate pages for file | code:",st,1);
         return st;
     }
     if (FileSize == 0)
     {
         File->Close(File);
-        L_PrintB("error",L"File is empty | code:",st,1);
+        K_PrintK("error",L"File is empty | code:",st,1);
         return EFI_LOAD_ERROR;
     }
 
@@ -207,13 +341,13 @@ EFI_STATUS B_GetFile(file_info *file_info, CHAR16 *path)
     if (FileBuffer == NULL)
     {
         File->Close(File);
-        L_PrintB("error",L"Failed to allocate memory for file buffer | code:",st,1);
+        K_PrintK("error",L"Failed to allocate memory for file buffer | code:",st,1);
         return EFI_OUT_OF_RESOURCES;
     }
     st = File->SetPosition(File, 0);
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"Failed to set file position | code:",st,1);
+        K_PrintK("error",L"Failed to set file position | code:",st,1);
         gBS->FreePages((EFI_PHYSICAL_ADDRESS)(UINTN)FileBuffer, pages);
         File->Close(File);
         return st;
@@ -221,7 +355,7 @@ EFI_STATUS B_GetFile(file_info *file_info, CHAR16 *path)
     st = File->Read(File, &FileSize, FileBuffer);
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"can't read the file | code:",st,1);
+        K_PrintK("error",L"can't read the file | code:",st,1);
         gBS->FreePages((EFI_PHYSICAL_ADDRESS)(UINTN)FileBuffer, pages);
         return EFI_LOAD_ERROR;
     }
@@ -248,7 +382,7 @@ EFI_STATUS B_GetACPI(EFI_PHYSICAL_ADDRESS *acpi_addr)
         if (CompareGuid(&config_table[i].VendorGuid, &gEfiAcpi20TableGuid))
         {
             *acpi_addr = (EFI_PHYSICAL_ADDRESS)(UINTN)config_table[i].VendorTable;
-            L_PrintB("loader",L"ACPI 2.0 table found at address: 0x",acpi_addr,1);
+            K_PrintK("loader",L"ACPI 2.0 table found at address: 0x",acpi_addr,1);
             return EFI_SUCCESS;
         }
     }
@@ -258,11 +392,11 @@ EFI_STATUS B_GetACPI(EFI_PHYSICAL_ADDRESS *acpi_addr)
         if (CompareGuid(&config_table[i].VendorGuid, &gEfiAcpi10TableGuid))
         {
             *acpi_addr = (EFI_PHYSICAL_ADDRESS)(UINTN)config_table[i].VendorTable;
-            L_PrintB("loader",L"ACPI table found at address: 0x",acpi_addr,1);
+            K_PrintK("loader",L"ACPI table found at address: 0x",acpi_addr,1);
             return EFI_SUCCESS;
         }
     }
-    L_PrintB("error",L"ACPI table not found | code:",EFI_NOT_FOUND,1);
+    K_PrintK("error",L"ACPI table not found | code:",EFI_NOT_FOUND,1);
     return EFI_NOT_FOUND;
 }
 
@@ -278,7 +412,7 @@ EFI_STATUS B_GetGop(gop *scr)
         (VOID **)&gop);
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"couldn’t allocate memory | code:",st,1);
+        K_PrintK("error",L"couldn’t allocate memory | code:",st,1);
         return st;
     }
     // debug
@@ -333,7 +467,7 @@ EFI_STATUS B_GetMmap(mem_map *m)
 
     if (st != EFI_BUFFER_TOO_SMALL)
     {
-        L_PrintB("error",L"st != EFI_BUFFER_TOO_SMALL | code:",st,1);
+        K_PrintK("error",L"st != EFI_BUFFER_TOO_SMALL | code:",st,1);
         return st;
     }
 
@@ -350,7 +484,7 @@ EFI_STATUS B_GetMmap(mem_map *m)
 
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"couldn't allocate memory. | code:",st,1);
+        K_PrintK("error",L"couldn't allocate memory. | code:",st,1);
         return st;
     }
 
@@ -366,7 +500,7 @@ EFI_STATUS B_GetMmap(mem_map *m)
 
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"GetMemoryMap error | code:",st,1);
+        K_PrintK("error",L"GetMemoryMap error | code:",st,1);
         return st;
     }
 
@@ -381,7 +515,7 @@ EFI_STATUS B_GetELF(file_elf_info *elf_file_info, CHAR16 *path)
     st = B_GetFile(&get_file_info, path);
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"Failed to load elf file | code:",st,1);
+        K_PrintK("error",L"Failed to load elf file | code:",st,1);
 
         return st;
     }
@@ -395,14 +529,14 @@ EFI_STATUS B_GetELF(file_elf_info *elf_file_info, CHAR16 *path)
         Ehdr->e_ident[2] != 'L' ||
         Ehdr->e_ident[3] != 'F')
     {
-        L_PrintB("error",L"This ain’t ELF | code:",0x55AA,1);
+        K_PrintK("error",L"This ain’t ELF | code:",0x55AA,1);
         //bios
         return EFI_LOAD_ERROR;
     }
     // is 64bit?
     if (Ehdr->e_ident[EI_CLASS] != ELFCLASS64)
     {
-        L_PrintB("error",L"This ain’t 64-bit | code:",0x64,1);
+        K_PrintK("error",L"This ain’t 64-bit | code:",0x64,1);
         //64bit
         return EFI_LOAD_ERROR;
     }
@@ -498,7 +632,7 @@ void menu_main(file_info *bmp, gop *gop)
 {
     B_GetFile(bmp, MENU_PATH);
     L_PrintBMP(bmp, *gop, 0, 0, 0, 0, 0, 0);
-    L_PrintB("loader",L"Menu displayed. Press any key to continue...",0,5);
+    K_PrintK("loader",L"Menu displayed. Press any key to continue...",0,5);
 L_HLT();
 }
 
@@ -540,7 +674,7 @@ EFI_STATUS EFIAPI UefiMain(
     st = B_GetGop(&gop);
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"Failed to get GOP | code:",st,1);
+        K_PrintK("error",L"Failed to get GOP | code:",st,1);
         L_HLT();
     }
     for (int i = 0; i < 30; i++)
@@ -579,8 +713,8 @@ EFI_STATUS EFIAPI UefiMain(
 
 
 */
-    L_PrintB("loader",L"HelloWorld",0,5);
-    L_PrintB("loader",L"",0,5);
+    K_PrintK("loader",L"HelloWorld",0,5);
+    K_PrintK("loader",L"",0,5);
 
 /*
     Print(L" ______                       _                    _               \n");
@@ -590,34 +724,34 @@ EFI_STATUS EFIAPI UefiMain(
     Print(L"| |__)  )| |_| || |_| || |__ | || |_| |( ( | |( (_| |( (/ / | |    \n");
     Print(L"|______/  \\___/  \\___/  \\___)|_| \\___/  \\_||_| \\____| \\____)|_|    \n");
 */
-    L_PrintB("loader",L" ______                       _                    _               ",0,5);
-    L_PrintB("loader",L"|  __ \\                _    | |                  | |              ",0,5);
-    L_PrintB("loader",L"| |__)  )  ___    ___  | |_  | |  ___    ____   _ | |  ____   ____ ",0,5);
-    L_PrintB("loader",L"|  __  (  _ \\  / _ \\ |  _) | | / _ \\  / _  | / || | / _  ) / ___)",0,5);
-    L_PrintB("loader",L"| |__)  )| |_| || |_| || |__ | || |_| |( ( | |( (_| |( (/ / | |    ",0,5);
-    L_PrintB("loader",L"|______/  \\___/  \\___/  \\___)|_| \\___/  \\_||_| \\____| \\____)|_|    ",0,5);
+    K_PrintK("loader",L" ______                       _                    _               ",0,5);
+    K_PrintK("loader",L"|  __ \\                _    | |                  | |              ",0,5);
+    K_PrintK("loader",L"| |__)  )  ___    ___  | |_  | |  ___    ____   _ | |  ____   ____ ",0,5);
+    K_PrintK("loader",L"|  __  (  _ \\  / _ \\ |  _) | | / _ \\  / _  | / || | / _  ) / ___)",0,5);
+    K_PrintK("loader",L"| |__)  )| |_| || |_| || |__ | || |_| |( ( | |( (_| |( (/ / | |    ",0,5);
+    K_PrintK("loader",L"|______/  \\___/  \\___/  \\___)|_| \\___/  \\_||_| \\____| \\____)|_|    ",0,5);
 
 
 
 
-    L_PrintB("loader",L"technOS bootloader v2.0",0,5);
+    K_PrintK("loader",L"technOS bootloader v2.0",0,5);
 
     if (boot_info.debugmode)
     {
-        L_PrintB("loader",L"Debug mode is enabled",0,5);
+        K_PrintK("loader",L"Debug mode is enabled",0,5);
     }
     gBS->Stall(3000000);
     // step1
     st = B_GetMmap(&mem);
     if (EFI_ERROR(st))
     {
-            L_PrintB("error",L"Failed to get memory map | code:",st,1);
+            K_PrintK("error",L"Failed to get memory map | code:",st,1);
         L_HLT();
     }
     st = B_GetFile(&bmp, LOGO_PATH);
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"Failed to load logo image | code:",st,1);
+        K_PrintK("error",L"Failed to load logo image | code:",st,1);
         L_HLT();
 
     }
@@ -625,7 +759,7 @@ EFI_STATUS EFIAPI UefiMain(
     st = B_GetACPI(&ACPIaddr);
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"Failed to get ACPI table | code:",st,1);
+        K_PrintK("error",L"Failed to get ACPI table | code:",st,1);
         L_HLT();
 
     }
@@ -634,7 +768,7 @@ EFI_STATUS EFIAPI UefiMain(
     st = B_GetELF(&boot_info.kernel, KERNEL_PATH);
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"Failed to load kernel ELF file | code:",st,1);
+        K_PrintK("error",L"Failed to load kernel ELF file | code:",st,1);
         L_HLT();
 
     }
@@ -642,28 +776,28 @@ EFI_STATUS EFIAPI UefiMain(
     st = B_MakeHandout(&boot_info, &gop, &mem, &bmp, ACPIaddr);
     if (EFI_ERROR(st))
     {
-        L_PrintB("error",L"Failed to create handout | code:",st,1);
+        K_PrintK("error",L"Failed to create handout | code:",st,1);
         L_HLT();
 
     }
 
-    L_PrintB("loader",L"Boot process completed successfully",0,1);
-    L_PrintB("loader",L"kernel_entry       : 0x",boot_info.kernel.entry,1);
-    L_PrintB("loader",L"kernel_file_start  : 0x",boot_info.kernel.file_addr,1);
-    L_PrintB("loader",L"kernel_file_size   : 0x",boot_info.kernel.file_size,1);
+    K_PrintK("loader",L"Boot process completed successfully",0,1);
+    K_PrintK("loader",L"kernel_entry       : 0x",boot_info.kernel.entry,1);
+    K_PrintK("loader",L"kernel_file_start  : 0x",boot_info.kernel.file_addr,1);
+    K_PrintK("loader",L"kernel_file_size   : 0x",boot_info.kernel.file_size,1);
 
-    L_PrintB("loader",L"booster_entry      : 0x",boot_info.booster.entry,1);
-    L_PrintB("loader",L"booster_file_start : 0x",boot_info.booster.file_addr,1);
-    L_PrintB("loader",L"booster_file_size  : 0x",boot_info.booster.file_size,1);
+    K_PrintK("loader",L"booster_entry      : 0x",boot_info.booster.entry,1);
+    K_PrintK("loader",L"booster_file_start : 0x",boot_info.booster.file_addr,1);
+    K_PrintK("loader",L"booster_file_size  : 0x",boot_info.booster.file_size,1);
 
-    L_PrintB("loader",L"ACPI addr          : 0x",boot_info.acpi,1);
+    K_PrintK("loader",L"ACPI addr          : 0x",boot_info.acpi,1);
 
-    L_PrintB("loader",L"framebuffer addr   : 0x",boot_info.gop.fb_base,1);
-    L_PrintB("loader",L"framebuffer size   : 0x",boot_info.gop.fb_size,1);
-    L_PrintB("loader",L"framebuffer format : ",boot_info.gop.fomat,1);
-    L_PrintB("loader",L"framebuffer width  : ",boot_info.gop.width,1);
-    L_PrintB("loader",L"framebuffer height : ", boot_info.gop.height,1);
-    L_PrintB("loader",L"framebuffer pps    : ",boot_info.gop.pps,1);
+    K_PrintK("loader",L"framebuffer addr   : 0x",boot_info.gop.fb_base,1);
+    K_PrintK("loader",L"framebuffer size   : 0x",boot_info.gop.fb_size,1);
+    K_PrintK("loader",L"framebuffer format : ",boot_info.gop.fomat,1);
+    K_PrintK("loader",L"framebuffer width  : ",boot_info.gop.width,1);
+    K_PrintK("loader",L"framebuffer height : ", boot_info.gop.height,1);
+    K_PrintK("loader",L"framebuffer pps    : ",boot_info.gop.pps,1);
 
 
     // step3
@@ -671,3 +805,51 @@ EFI_STATUS EFIAPI UefiMain(
     B_JmpBooster(&boot_info);
     return EFI_SUCCESS;
 }
+
+
+//====================
+//BOOSTER
+//====================
+/*1 カーネルのランダム配置化
+2 IO初期化
+3 仮想アドレス
+4 他コア起動
+5 initアプリへジャンプ*/
+
+//OSのメモリ管理方式について、容量を4Kibの単位に分けて管理させる 余った部分は専用テーブルに移動させる
+//専用テーブルでは256b 512b 1024b...のように2^nbずつのラベルが貼られたテーブルがある 300bは256bのラベルが貼られたテーブルに入る　５１１bは256bに入る
+//4Kib以下のメモリ要求がきたらここを使うようにする方式はダメだろうか
+//サイズクラス・フリーリスト方式というらしい by AI
+/*4kibバイト以上ならページ管理
+それ以下ならページ分割
+
+ページ分割は最小8b
+専用テーブルで2分岐探索で取得
+
+使用したら使用領域"ページ"テーブルに追加
+解放時、ページテーブルより前後の状況を見て結合するかを決める
+OSページユーザーページは明確に分ける
+ページ境界をまたぐ大規模確保は残りのあまりを小型管理域に設定
+
+なお全て8b境界とする
+小型分割のイメージはSIMD
+可変長領域を確保するがページをまたぐ場合は新たなページで確保*/
+
+
+#define PML4_IDX(num) (((num) >> 39) & 0x1FF)
+#define PDPT_IDX(num) (((num) >> 30) & 0x1FF)
+#define PD_IDX(num) (((num) >> 21) & 0x1FF)
+#define PT_IDX(num) (((num) >> 12) & 0x1F)
+
+#define PAGE_PRESENT (1ULL << 0)
+#define PAGE_WRITE (1ULL << 1)
+#define PAGE_USER (1ULL << 2)
+#define PAGE_NX (1ULL << 63)
+
+void MapPage() {}
+
+void booster_main()
+{
+}
+
+
